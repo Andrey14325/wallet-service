@@ -13,6 +13,7 @@ type AccountStorage interface {
 	CreateNewAccount(ctx context.Context, userID string) (models.Account, error)
 	GetAccount(ctx context.Context, id string) (models.Account, error)
 	Deposit(ctx context.Context, accountID, operationID string, amount int64) error
+	Transfer(ctx context.Context, fromID, toID, operationID string, amount int64) error
 }
 
 type AccountService struct {
@@ -62,5 +63,28 @@ func (s *AccountService) Deposit(ctx context.Context, accountID string, amount i
 		return fmt.Errorf("deposit :%w", err) //не делеаю проверку на разные типы ошибкок, так как тут на по сути все равно, и надо будет проверять в хендлере при ответе
 	}
 
+	return nil
+}
+
+func (s *AccountService) Transfer(ctx context.Context, fromID, toID string, amount int64) error {
+	from, err := uuid.Parse(fromID)
+	if err != nil {
+		return fmt.Errorf("invalid sender id: %w", models.ErrValidation)
+	}
+	to, err := uuid.Parse(toID)
+	if err != nil {
+		return fmt.Errorf("invalid receiver id: %w", models.ErrValidation)
+	}
+	if from == to {
+		return fmt.Errorf("transfer to yourself: %w", models.ErrValidation)
+	}
+	if amount <= 0 {
+		return fmt.Errorf("unacceptable amount: %w", models.ErrValidation)
+	}
+
+	operationID := uuid.NewString()
+	if err := s.storage.Transfer(ctx, from.String(), to.String(), operationID, amount); err != nil {
+		return fmt.Errorf("transfer: %w", err)
+	}
 	return nil
 }

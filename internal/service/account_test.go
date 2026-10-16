@@ -8,6 +8,7 @@ import (
 )
 
 const validID = "11111111-1111-1111-1111-111111111111"
+const otherID = "22222222-2222-2222-2222-222222222222"
 
 var errBoom = errors.New("boom") // произвольная ошибка storage
 
@@ -15,6 +16,7 @@ type mockAccountStorage struct {
 	createNewAccountFunc func(ctx context.Context, userID string) (models.Account, error)
 	getAccountFunc       func(ctx context.Context, id string) (models.Account, error)
 	depositFunc          func(ctx context.Context, accountID, operationID string, amount int64) error
+	transferFunc         func(ctx context.Context, fromID, toID, operationID string, amount int64) error
 }
 
 func (m *mockAccountStorage) CreateNewAccount(ctx context.Context, userID string) (models.Account, error) {
@@ -36,6 +38,13 @@ func (m *mockAccountStorage) Deposit(ctx context.Context, accountID, operationID
 		panic("Deposit was not expected to be called in this test")
 	}
 	return m.depositFunc(ctx, accountID, operationID, amount)
+}
+
+func (m *mockAccountStorage) Transfer(ctx context.Context, fromID, toID, operationID string, amount int64) error {
+	if m.transferFunc == nil {
+		panic("Transfer was not expected to be called in this test")
+	}
+	return m.transferFunc(ctx, fromID, toID, operationID, amount)
 }
 
 func TestAccountService_CreateNewAccount_InvalidUserID(t *testing.T) {
@@ -171,6 +180,83 @@ func TestAccountService_Deposit_Success(t *testing.T) {
 	srv := NewAccountService(mock)
 
 	err := srv.Deposit(context.Background(), validID, 100)
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+}
+
+func TestAccountService_Transfer_InvalidFromID(t *testing.T) {
+	srv := NewAccountService(&mockAccountStorage{})
+
+	err := srv.Transfer(context.Background(), "abc", otherID, 100)
+	if !errors.Is(err, models.ErrValidation) {
+		t.Errorf("expected ErrValidation, got %v", err)
+	}
+}
+
+func TestAccountService_Transfer_InvalidToID(t *testing.T) {
+	srv := NewAccountService(&mockAccountStorage{})
+
+	err := srv.Transfer(context.Background(), validID, "abc", 100)
+	if !errors.Is(err, models.ErrValidation) {
+		t.Errorf("expected ErrValidation, got %v", err)
+	}
+}
+
+func TestAccountService_Transfer_SameAccount(t *testing.T) {
+	srv := NewAccountService(&mockAccountStorage{})
+
+	err := srv.Transfer(context.Background(), validID, validID, 100)
+	if !errors.Is(err, models.ErrValidation) {
+		t.Errorf("expected ErrValidation, got %v", err)
+	}
+}
+
+func TestAccountService_Transfer_SameAccountDifferentCase(t *testing.T) {
+	srv := NewAccountService(&mockAccountStorage{})
+
+	// тот же UUID, записанный по-другому (проверяет нормализацию)
+	err := srv.Transfer(context.Background(), "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA", "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", 100)
+	if !errors.Is(err, models.ErrValidation) {
+		t.Errorf("expected ErrValidation, got %v", err)
+	}
+}
+
+func TestAccountService_Transfer_InvalidAmount(t *testing.T) {
+	srv := NewAccountService(&mockAccountStorage{})
+
+	err := srv.Transfer(context.Background(), validID, otherID, 0)
+	if !errors.Is(err, models.ErrValidation) {
+		t.Errorf("expected ErrValidation, got %v", err)
+	}
+}
+
+func TestAccountService_Transfer_NotEnoughMoney(t *testing.T) {
+	mock := &mockAccountStorage{
+		transferFunc: func(ctx context.Context, fromID, toID, operationID string, amount int64) error {
+			return models.ErrAccountNotEnoughMoney
+		},
+	}
+	srv := NewAccountService(mock)
+
+	err := srv.Transfer(context.Background(), validID, otherID, 100)
+	if !errors.Is(err, models.ErrAccountNotEnoughMoney) {
+		t.Errorf("expected ErrAccountNotEnoughMoney, got %v", err)
+	}
+}
+
+func TestAccountService_Transfer_Success(t *testing.T) {
+	mock := &mockAccountStorage{
+		transferFunc: func(ctx context.Context, fromID, toID, operationID string, amount int64) error {
+			if fromID != validID || toID != otherID || amount != 100 {
+				t.Errorf("storage got (%s, %s, %d), want (%s, %s, 100)", fromID, toID, amount, validID, otherID)
+			}
+			return nil
+		},
+	}
+	srv := NewAccountService(mock)
+
+	err := srv.Transfer(context.Background(), validID, otherID, 100)
 	if err != nil {
 		t.Errorf("expected no error, got %v", err)
 	}

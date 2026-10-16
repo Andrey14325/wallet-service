@@ -17,6 +17,7 @@ type AccountService interface {
 	CreateNewAccount(ctx context.Context, userID string) (models.Account, error)
 	GetAccount(ctx context.Context, id string) (models.Account, error)
 	Deposit(ctx context.Context, accountID string, amount int64) error
+	Transfer(ctx context.Context, fromID, toID string, amount int64) error
 }
 
 type Handler struct {
@@ -127,6 +128,41 @@ func (h *Handler) Deposit(w http.ResponseWriter, r *http.Request) {
 		}
 		h.logger.Error("error deposit", slog.String("error", err.Error()))
 		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	h.writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (h *Handler) Transfer(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
+
+	var req models.Transfer
+
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		h.logger.Warn("invalid transfer request", slog.String("error", err.Error()))
+		writeError(w, http.StatusBadRequest, "invalid transfer request")
+		return
+	}
+
+	err := h.accountService.Transfer(r.Context(), req.FromID, req.ToID, req.Amount)
+	if err != nil {
+		switch {
+		case errors.Is(err, models.ErrValidation):
+			h.logger.Warn("transfer: invalid request", slog.String("error", err.Error()))
+			writeError(w, http.StatusBadRequest, "invalid request")
+		case errors.Is(err, models.ErrAccountNotFound):
+			h.logger.Warn("transfer: account not found", slog.String("error", err.Error()))
+			writeError(w, http.StatusNotFound, "account not found")
+		case errors.Is(err, models.ErrAccountNotEnoughMoney):
+			h.logger.Warn("transfer: not enough money", slog.String("error", err.Error()))
+			writeError(w, http.StatusUnprocessableEntity, "not enough money")
+		default:
+			h.logger.Error("error transfer", slog.String("error", err.Error()))
+			writeError(w, http.StatusInternalServerError, "internal error")
+		}
 		return
 	}
 
