@@ -15,3 +15,9 @@ type Transfer struct {
 	ToID   string `json:"to_account_id"`
 	Amount int64  `json:"amount"`
 }
+
+type BalanceCheck struct {
+	AccountID string
+	Balance   int64
+	LedgerSum int64
+}

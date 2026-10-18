@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"wallet-service/internal/config"
 	"wallet-service/internal/handlers"
+	"wallet-service/internal/reconciler"
 	"wallet-service/internal/server"
 	"wallet-service/internal/service"
 	"wallet-service/internal/storage"
@@ -42,6 +43,9 @@ func main() {
 		os.Exit(1)
 	}
 	server.SetupRoutes(serv, handle)
+
+	checker := reconciler.NewAccountCheck(accountStorage, logger, cfg.Interval, 100)
+	go checker.Run(ctx)
 
 	if err := serv.RunServer(ctx); err != nil {
 		logger.Error("error running server", slog.Any("error", err))
