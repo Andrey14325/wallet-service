@@ -17,7 +17,7 @@ type AccountService interface {
 	CreateNewAccount(ctx context.Context, userID string) (models.Account, error)
 	GetAccount(ctx context.Context, id string) (models.Account, error)
 	Deposit(ctx context.Context, accountID string, amount int64) error
-	Transfer(ctx context.Context, fromID, toID string, amount int64) error
+	Transfer(ctx context.Context, fromID, toID string, idemKey string, amount int64) error
 }
 
 type Handler struct {
@@ -135,6 +135,8 @@ func (h *Handler) Deposit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Transfer(w http.ResponseWriter, r *http.Request) {
+	key := r.Header.Get("Idempotency-Key")
+
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
 
 	var req models.Transfer
@@ -147,7 +149,7 @@ func (h *Handler) Transfer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := h.accountService.Transfer(r.Context(), req.FromID, req.ToID, req.Amount)
+	err := h.accountService.Transfer(r.Context(), req.FromID, req.ToID, key, req.Amount)
 	if err != nil {
 		switch {
 		case errors.Is(err, models.ErrValidation):
@@ -159,6 +161,9 @@ func (h *Handler) Transfer(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, models.ErrAccountNotEnoughMoney):
 			h.logger.Warn("transfer: not enough money", slog.String("error", err.Error()))
 			writeError(w, http.StatusUnprocessableEntity, "not enough money")
+		case errors.Is(err, models.ErrIdempotencyConflict):
+			h.logger.Warn("transfer: idempotency key already used", slog.String("error", err.Error()))
+			writeError(w, http.StatusConflict, "idempotency key already used")
 		default:
 			h.logger.Error("error transfer", slog.String("error", err.Error()))
 			writeError(w, http.StatusInternalServerError, "internal error")

@@ -115,6 +115,31 @@ func (s *AccountStorage) Transfer(ctx context.Context, fromID, toID, operationID
 		balances[id] = balance
 	}
 
+	var total, matching int64
+	err = tx.QueryRow(ctx, `
+		SELECT
+			COUNT(*),
+			COUNT(*) FILTER (
+				WHERE (account_id = $2 AND amount = $4)
+				OR (account_id = $3 AND amount = $5)
+			)
+		FROM ledger_entries
+		WHERE operation_id = $1`,
+		operationID, fromID, toID, -amount, amount,
+	).Scan(&total, &matching)
+	if err != nil {
+		return fmt.Errorf("check operation: %w", err)
+	}
+
+	switch {
+	case total == 0:
+		// новая операция, идём дальше
+	case total == 2 && matching == 2:
+		return nil // тот же перевод, повтор
+	default:
+		return fmt.Errorf("transfer: %w", models.ErrIdempotencyConflict)
+	}
+
 	if balances[fromID] < amount {
 		return fmt.Errorf("transfer: %w", models.ErrAccountNotEnoughMoney)
 	}

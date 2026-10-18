@@ -47,7 +47,7 @@ func (s *AccountService) GetAccount(ctx context.Context, id string) (models.Acco
 		return models.Account{}, fmt.Errorf("get account: %w", err)
 	}
 
-	return acc, err
+	return acc, nil
 }
 
 func (s *AccountService) Deposit(ctx context.Context, accountID string, amount int64) error {
@@ -60,13 +60,13 @@ func (s *AccountService) Deposit(ctx context.Context, accountID string, amount i
 	operationID := uuid.NewString()
 	err := s.storage.Deposit(ctx, accountID, operationID, amount)
 	if err != nil {
-		return fmt.Errorf("deposit :%w", err) //не делеаю проверку на разные типы ошибкок, так как тут на по сути все равно, и надо будет проверять в хендлере при ответе
+		return fmt.Errorf("deposit: %w", err) //не делеаю проверку на разные типы ошибкок, так как тут на по сути все равно, и надо будет проверять в хендлере при ответе
 	}
 
 	return nil
 }
 
-func (s *AccountService) Transfer(ctx context.Context, fromID, toID string, amount int64) error {
+func (s *AccountService) Transfer(ctx context.Context, fromID, toID, idemKey string, amount int64) error {
 	from, err := uuid.Parse(fromID)
 	if err != nil {
 		return fmt.Errorf("invalid sender id: %w", models.ErrValidation)
@@ -75,6 +75,10 @@ func (s *AccountService) Transfer(ctx context.Context, fromID, toID string, amou
 	if err != nil {
 		return fmt.Errorf("invalid receiver id: %w", models.ErrValidation)
 	}
+	key, err := uuid.Parse(idemKey)
+	if err != nil {
+		return fmt.Errorf("invalid idempotency key: %w", models.ErrValidation)
+	}
 	if from == to {
 		return fmt.Errorf("transfer to yourself: %w", models.ErrValidation)
 	}
@@ -82,8 +86,7 @@ func (s *AccountService) Transfer(ctx context.Context, fromID, toID string, amou
 		return fmt.Errorf("unacceptable amount: %w", models.ErrValidation)
 	}
 
-	operationID := uuid.NewString()
-	if err := s.storage.Transfer(ctx, from.String(), to.String(), operationID, amount); err != nil {
+	if err := s.storage.Transfer(ctx, from.String(), to.String(), key.String(), amount); err != nil {
 		return fmt.Errorf("transfer: %w", err)
 	}
 	return nil
