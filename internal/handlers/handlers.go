@@ -2,10 +2,12 @@ package handlers
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"wallet-service/internal/models"
 
 	"github.com/google/uuid"
@@ -20,15 +22,21 @@ type AccountService interface {
 	Transfer(ctx context.Context, fromID, toID string, idemKey string, amount int64) error
 }
 
+type LedgerService interface {
+	ListEntries(ctx context.Context, accountID string, cursor *models.Cursor, limit int) ([]models.LedgerEntry, *models.Cursor, error)
+}
+
 type Handler struct {
 	logger         *slog.Logger
 	accountService AccountService
+	ledgerService  LedgerService
 }
 
-func New(logger *slog.Logger, accountService AccountService) *Handler {
+func New(logger *slog.Logger, accountService AccountService, ledgerService LedgerService) *Handler {
 	return &Handler{
 		logger:         logger,
 		accountService: accountService,
+		ledgerService:  ledgerService,
 	}
 }
 
@@ -172,6 +180,102 @@ func (h *Handler) Transfer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (h *Handler) ListEntries(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		h.logger.Warn("invalid account id",
+			slog.String("id", r.PathValue("id")),
+			slog.String("error", err.Error()),
+		)
+		writeError(w, http.StatusBadRequest, "invalid account id")
+		return
+	}
+
+	limit := 0
+	if s := r.URL.Query().Get("limit"); s != "" {
+		n, err := strconv.Atoi(s)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid limit")
+			return
+		}
+		limit = n
+	}
+
+	cursor, err := decodeCursor(r.URL.Query().Get("cursor"))
+	if err != nil {
+		h.logger.Warn("invalid cursor", slog.String("error", err.Error()))
+		writeError(w, http.StatusBadRequest, "invalid cursor")
+		return
+	}
+
+	entries, nextCursor, err := h.ledgerService.ListEntries(r.Context(), id.String(), cursor, limit)
+	if err != nil {
+		if errors.Is(err, models.ErrAccountNotFound) {
+			h.logger.Warn("list_entries: account not found", slog.String("error", err.Error()))
+			writeError(w, http.StatusNotFound, "account not found")
+			return
+		}
+		if errors.Is(err, models.ErrValidation) {
+			h.logger.Warn("list_entries: invalid request", slog.String("error", err.Error()))
+			writeError(w, http.StatusBadRequest, "invalid request")
+			return
+		}
+		h.logger.Error("error list entries", slog.String("error", err.Error()))
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	nextStr, err := encodeCursor(nextCursor)
+	if err != nil {
+		h.logger.Error("error encode cursor", slog.String("error", err.Error()))
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	if entries == nil {
+		entries = []models.LedgerEntry{}
+	}
+
+	type historyResponse struct {
+		Items      []models.LedgerEntry `json:"items"`
+		NextCursor string               `json:"next_cursor,omitempty"`
+	}
+
+	h.writeJSON(w, http.StatusOK, historyResponse{Items: entries, NextCursor: nextStr})
+}
+
+func encodeCursor(c *models.Cursor) (string, error) {
+	if c == nil {
+		return "", nil
+	}
+	data, err := json.Marshal(c)
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(data), nil
+}
+
+func decodeCursor(s string) (*models.Cursor, error) {
+	if s == "" {
+		return nil, nil
+	}
+	data, err := base64.RawURLEncoding.DecodeString(s)
+	if err != nil {
+		return nil, err
+	}
+	var c models.Cursor
+	if err := json.Unmarshal(data, &c); err != nil {
+		return nil, err
+	}
+	if _, err := uuid.Parse(c.ID); err != nil {
+		return nil, err
+	}
+	if c.CreatedAt.IsZero() {
+		return nil, errors.New("invalid time")
+	}
+	return &c, nil
 }
 
 func (h *Handler) writeJSON(w http.ResponseWriter, status int, v any) {

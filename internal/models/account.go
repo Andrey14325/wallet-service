@@ -21,3 +21,16 @@ type BalanceCheck struct {
 	Balance   int64
 	LedgerSum int64
 }
+
+type LedgerEntry struct {
+	ID          string    `json:"id"`
+	AccountID   string    `json:"account_id"`
+	OperationID string    `json:"operation_id"`
+	CreatedAt   time.Time `json:"created_at"`
+	Amount      int64     `json:"amount"`
+}
+
+type Cursor struct {
+	CreatedAt time.Time `json:"created_at"`
+	ID        string    `json:"id"`
+}

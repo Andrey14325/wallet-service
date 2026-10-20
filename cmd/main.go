@@ -34,8 +34,10 @@ func main() {
 
 	accountStorage := storage.NewAccountStorage(pool)
 	accountService := service.NewAccountService(accountStorage)
+	ledgerStorage := storage.NewLedgerEntries(pool)
+	ledgerService := service.NewLedgerService(ledgerStorage)
 
-	handle := handlers.New(logger, accountService)
+	handle := handlers.New(logger, accountService, ledgerService)
 
 	serv, err := server.NewServer(logger, cfg.ServAddress)
 	if err != nil {

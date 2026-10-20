@@ -12,6 +12,7 @@ func SetupRoutes(serv *Server, h *handlers.Handler) {
 	mux.HandleFunc("GET /accounts/{id}", h.GetAccount)
 	mux.HandleFunc("POST /accounts/{id}/deposit", h.Deposit)
 	mux.HandleFunc("POST /transfers", h.Transfer)
+	mux.HandleFunc("GET /accounts/{id}/history", h.ListEntries)
 
 	var handler http.Handler = mux
 
