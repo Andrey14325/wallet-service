@@ -87,3 +87,61 @@ func (s *LedgerStorage) ListEntries(ctx context.Context, accountID string, curso
 
 	return entries, nil
 }
+
+func (s *LedgerStorage) Statement(ctx context.Context, accountID string, limit int) ([]models.StatementEntry, error) {
+	var exists bool
+	err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS (
+			SELECT 1 FROM accounts WHERE account_id = $1
+		)`,
+		accountID,
+	).Scan(&exists)
+
+	if err != nil {
+		return nil, fmt.Errorf("check account: %w", err)
+	}
+
+	if !exists {
+		return nil, models.ErrAccountNotFound
+	}
+
+	pgRows, err := s.pool.Query(ctx, `
+		SELECT id, account_id, operation_id, amount, created_at, balance_after
+		FROM (
+			SELECT id, account_id, operation_id, amount, created_at,
+				SUM(amount) OVER (ORDER BY created_at, id)::bigint AS balance_after
+			FROM ledger_entries
+			WHERE account_id = $1
+		) t
+		ORDER BY created_at DESC, id DESC
+		LIMIT $2`, accountID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("get ledger: %w", err)
+	}
+	defer pgRows.Close()
+
+	statements := make([]models.StatementEntry, 0, limit)
+
+	for pgRows.Next() {
+		var statement models.StatementEntry
+
+		err := pgRows.Scan(
+			&statement.ID,
+			&statement.AccountID,
+			&statement.OperationID,
+			&statement.Amount,
+			&statement.CreatedAt,
+			&statement.BalanceAfter,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan ledger statement: %w", err)
+		}
+
+		statements = append(statements, statement)
+	}
+	if err := pgRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate ledger statements: %w", err)
+	}
+
+	return statements, nil
+}

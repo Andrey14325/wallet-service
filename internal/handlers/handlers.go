@@ -24,6 +24,7 @@ type AccountService interface {
 
 type LedgerService interface {
 	ListEntries(ctx context.Context, accountID string, cursor *models.Cursor, limit int) ([]models.LedgerEntry, *models.Cursor, error)
+	Statement(ctx context.Context, accountID string, limit int) ([]models.StatementEntry, error)
 }
 
 type Handler struct {
@@ -244,6 +245,51 @@ func (h *Handler) ListEntries(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.writeJSON(w, http.StatusOK, historyResponse{Items: entries, NextCursor: nextStr})
+}
+
+func (h *Handler) Statement(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		h.logger.Warn("invalid account id",
+			slog.String("id", r.PathValue("id")),
+			slog.String("error", err.Error()),
+		)
+		writeError(w, http.StatusBadRequest, "invalid account id")
+		return
+	}
+
+	limit := 0
+	if s := r.URL.Query().Get("limit"); s != "" {
+		n, err := strconv.Atoi(s)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid limit")
+			return
+		}
+		limit = n
+	}
+
+	statements, err := h.ledgerService.Statement(r.Context(), id.String(), limit)
+	if err != nil {
+		if errors.Is(err, models.ErrAccountNotFound) {
+			h.logger.Warn("statement: account not found", slog.String("error", err.Error()))
+			writeError(w, http.StatusNotFound, "account not found")
+			return
+		}
+		if errors.Is(err, models.ErrValidation) {
+			h.logger.Warn("statement: invalid request", slog.String("error", err.Error()))
+			writeError(w, http.StatusBadRequest, "invalid request")
+			return
+		}
+		h.logger.Error("error statement", slog.String("error", err.Error()))
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	if statements == nil {
+		statements = []models.StatementEntry{}
+	}
+
+	h.writeJSON(w, http.StatusOK, map[string]any{"items": statements})
 }
 
 func encodeCursor(c *models.Cursor) (string, error) {

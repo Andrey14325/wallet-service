@@ -13,8 +13,12 @@ func SetupRoutes(serv *Server, h *handlers.Handler) {
 	mux.HandleFunc("POST /accounts/{id}/deposit", h.Deposit)
 	mux.HandleFunc("POST /transfers", h.Transfer)
 	mux.HandleFunc("GET /accounts/{id}/history", h.ListEntries)
+	mux.HandleFunc("GET /accounts/{id}/statement", h.Statement)
 
 	var handler http.Handler = mux
+	handler = h.RecoveryMiddleware(handler)
+	handler = h.LoggingMiddleware(handler)
+	handler = h.RequestIDMiddleware(handler)
 
 	serv.SetHandler(handler)
 }

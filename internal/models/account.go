@@ -34,3 +34,12 @@ type Cursor struct {
 	CreatedAt time.Time `json:"created_at"`
 	ID        string    `json:"id"`
 }
+
+type StatementEntry struct {
+	ID           string    `json:"id"`
+	AccountID    string    `json:"account_id"`
+	OperationID  string    `json:"operation_id"`
+	CreatedAt    time.Time `json:"created_at"`
+	Amount       int64     `json:"amount"`
+	BalanceAfter int64     `json:"balance_after"`
+}
